@@ -6,9 +6,10 @@ import com.vk.api.sdk.client.VkApiClient;
 import com.vk.api.sdk.client.actors.UserActor;
 import com.vk.api.sdk.exceptions.ApiException;
 import com.vk.api.sdk.exceptions.ClientException;
-import com.vk.api.sdk.objects.groups.responses.GetByIdObjectLegacyResponse;
+import com.vk.api.sdk.objects.groups.Fields;
+import com.vk.api.sdk.objects.groups.GroupFull;
 import com.vk.api.sdk.objects.photos.PhotoSizes;
-import com.vk.api.sdk.objects.wall.WallpostFull;
+import com.vk.api.sdk.objects.wall.WallItem;
 import com.vk.api.sdk.objects.wall.responses.GetResponse;
 import edu.vkParser.exception.DownloadingException;
 import edu.vkParser.exception.SetupException;
@@ -34,13 +35,16 @@ public class CommunityPostsDownloader {
     private final UserActor actor;
 
     private String communityName;
+    private String communityDesc;
+    private String communityAvatarUrl;
     private String outputDir;
     private String imagesDir;
+    private String documentsDir;
 
     private final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
-    public CommunityPostsDownloader(int userId, String apiKey, VkApiClient vk, String communityId) {
+    public CommunityPostsDownloader(long userId, String apiKey, VkApiClient vk, String communityId) {
         this.communityId = communityId;
         this.vk = vk;
 
@@ -50,15 +54,20 @@ public class CommunityPostsDownloader {
 
     public void setupSettings() throws SetupException {
         try {
-            List<GetByIdObjectLegacyResponse> groups = vk.groups().getByIdObjectLegacy(actor).groupId(communityId).execute();
-            if(!groups.isEmpty()){
-                String groupName = groups.get(0).getName();
+            List<GroupFull> groups = vk.groups().getByIdObject(actor).groupId(communityId).fields(Fields.PHOTO_400, Fields.DESCRIPTION, Fields.NAME).execute().getGroups();
+            if (!groups.isEmpty()) {
+                GroupFull group = groups.get(0);
+                String groupName = group.getName();
                 System.out.println("Community group: \"" + groupName + "\", id" + communityId);
                 String trimmedName = groupName.replaceAll("[^\\p{L}\\p{Nd}]", "");
                 communityName = groupName;
+                communityDesc = group.getDescription();
+                communityAvatarUrl = group.getPhoto400().toString();
                 outputDir = "./vk_backup/" + trimmedName + "/";
                 imagesDir = outputDir + "images/";
+                documentsDir = outputDir + "documents/";
                 Files.createDirectories(Paths.get(imagesDir));
+                Files.createDirectories(Paths.get(documentsDir));
             }
         } catch (ApiException | ClientException e) {
             System.out.println("error using VK API:");
@@ -72,33 +81,34 @@ public class CommunityPostsDownloader {
     public void startDownloading() throws DownloadingException {
 
         String jsonFileName = outputDir + "posts_backup.json";
-        if (Files.exists(Paths.get(jsonFileName))){
+        if (Files.exists(Paths.get(jsonFileName))) {
             System.out.println("posts_backup.json exists already; override is cancelled");
             throw new DownloadingException("backup exists already");
         }
 
-        List<WallpostFull> allPosts = new ArrayList<>();
+        List<WallItem> allPosts = new ArrayList<>();
         int offset = 0;
         int count = 90; // ограничение за 1 запрос
         boolean printTotalPostsFlag = true; //нужно напечатать общее число постов
         int totalPosts = 1; // Динамически обновится при первом запросе
 
-        int communityOwnerId = Integer.parseInt(communityId);
+        long communityOwnerId = Long.parseLong(communityId);
         try {
             while (offset < totalPosts) {
-                GetResponse response = vk.wall().get(actor)
+                GetResponse response = vk.wall()
+                        .get(actor)
                         .ownerId(-communityOwnerId) // Минус обязателен для сообществ
                         .offset(offset)
                         .count(count)
                         .execute();
 
                 totalPosts = response.getCount();
-                if(printTotalPostsFlag) {
+                if (printTotalPostsFlag) {
                     System.out.println("Total posts: " + totalPosts);
                     printTotalPostsFlag = false;
                 }
 
-                List<WallpostFull> posts = response.getItems();
+                List<WallItem> posts = response.getItems();
                 if (posts.isEmpty()) break;
                 allPosts.addAll(posts);
                 System.out.println("loading posts... " + allPosts.size());
@@ -108,7 +118,7 @@ public class CommunityPostsDownloader {
 
             try (Writer writer = new FileWriter(jsonFileName)) {
                 System.out.println("writing JSON...");
-                GSON.toJson(allPosts, writer);
+                gson.toJson(allPosts, writer);
             } catch (IOException e) {
                 System.out.println("error writing JSON:");
                 e.printStackTrace();
@@ -126,7 +136,7 @@ public class CommunityPostsDownloader {
         }
     }
 
-    public void generateHtmlArchive(List<WallpostFull> posts) throws DownloadingException {
+    public void generateHtmlArchive(List<WallItem> posts) throws DownloadingException {
         System.out.println("downloading images and writing HTML...");
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>").append(communityName).append(" (archived)</title>")
@@ -141,7 +151,7 @@ public class CommunityPostsDownloader {
                 .append("</style></head><body>");
 
         html.append("<h1 style='text-align:center;'>").append(HtmlUtils.escapeHtml(communityName)).append("</h1>");
-        for (WallpostFull post : posts) {
+        for (WallItem post : posts) {
 
             LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(post.getDate()), ZoneId.systemDefault());
             String formattedDate = dateTime.format(DATE_FORMATTER);
@@ -194,7 +204,8 @@ public class CommunityPostsDownloader {
                                 break;
                         }
                     } catch (Exception e) {
-                        html.append("<div class='other-attach'>Ошибка загрузки вложения</div>");
+                        e.printStackTrace();
+                        html.append("<div class='other-attach'>Ошибка загрузки вложения</div></div>");
                     }
                 });
                 html.append("</div>");
@@ -232,7 +243,7 @@ public class CommunityPostsDownloader {
                 out.write(buffer, 0, bytesRead);
             }
         } catch (IOException e) {
-            System.err.println("Не удалось скачать файл: " + urlStr);
+            System.err.println("failed to download: " + urlStr);
         }
     }
 

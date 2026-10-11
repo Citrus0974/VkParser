@@ -50,7 +50,7 @@ public class Main {
                 try (BufferedReader reader = new BufferedReader(new FileReader("api-keys.txt"))) {
                     String apiKey = reader.readLine();
                     String userIdString = reader.readLine();
-                    int userId;
+                    long userId;
                     if (apiKey == null || apiKey.length() < 200) {
                         System.out.println("api key is invalid");
                         continue;
@@ -60,7 +60,7 @@ public class Main {
                         continue;
                     } else {
                         try {
-                            userId = Integer.parseInt(userIdString);
+                            userId = Long.parseLong(userIdString);
                         } catch (NumberFormatException e){
                             System.out.println("user id is invalid");
                             continue;
