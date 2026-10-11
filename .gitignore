@@ -39,3 +39,4 @@ build/
 
 api-keys.txt
 vk_backup/
+vk_backup**/
