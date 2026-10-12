@@ -11,21 +11,31 @@ import com.vk.api.sdk.objects.base.Image;
 import com.vk.api.sdk.objects.base.Link;
 import com.vk.api.sdk.objects.base.OwnerCover;
 import com.vk.api.sdk.objects.docs.Doc;
+import com.vk.api.sdk.objects.events.EventAttach;
+import com.vk.api.sdk.objects.fave.Page;
 import com.vk.api.sdk.objects.groups.Fields;
+import com.vk.api.sdk.objects.groups.GroupAttach;
 import com.vk.api.sdk.objects.groups.GroupFull;
+import com.vk.api.sdk.objects.market.MarketAlbum;
+import com.vk.api.sdk.objects.market.MarketItem;
+import com.vk.api.sdk.objects.notes.Note;
+import com.vk.api.sdk.objects.pages.WikipageFull;
+import com.vk.api.sdk.objects.photos.Photo;
 import com.vk.api.sdk.objects.photos.PhotoAlbum;
 import com.vk.api.sdk.objects.photos.PhotoSizes;
+import com.vk.api.sdk.objects.polls.Poll;
 import com.vk.api.sdk.objects.video.Video;
+import com.vk.api.sdk.objects.video.VideoAlbum;
+import com.vk.api.sdk.objects.video.VideoFull;
 import com.vk.api.sdk.objects.video.VideoImage;
-import com.vk.api.sdk.objects.wall.WallItem;
-import com.vk.api.sdk.objects.wall.WallpostAttachment;
-import com.vk.api.sdk.objects.wall.WallpostFull;
+import com.vk.api.sdk.objects.wall.*;
 import com.vk.api.sdk.objects.wall.responses.GetResponse;
 import edu.vkParser.exception.DownloadingException;
 import edu.vkParser.exception.SetupException;
 import edu.vkParser.util.HtmlUtils;
 
 import java.io.*;
+import java.net.URI;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -46,11 +56,14 @@ public class CommunityPostsDownloader {
 
     private String communityName;
     private String communityDesc;
+
     private String communityAvatarUrl;
     private String communityCoverUrl;
+
     private String outputDir;
     private String imagesDir;
     private String documentsDir;
+    private String audioDir;
 
     private final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -71,7 +84,7 @@ public class CommunityPostsDownloader {
                 String groupName = group.getName();
 
                 OwnerCover cover = group.getCover();
-                if (cover!= null && cover.getEnabled().getValue().equals("1")){
+                if (cover != null && cover.getEnabled().getValue().equals("1")) {
                     List<Image> images = group.getCover().getImages();
                     if (images != null && !images.isEmpty()) {
                         Image bestImage = images.stream()
@@ -89,8 +102,10 @@ public class CommunityPostsDownloader {
                 outputDir = "./vk_backup/" + trimmedName + "/";
                 imagesDir = outputDir + "images/";
                 documentsDir = outputDir + "documents/";
+                audioDir = outputDir + "audio/";
                 Files.createDirectories(Paths.get(imagesDir));
                 Files.createDirectories(Paths.get(documentsDir));
+                Files.createDirectories(Paths.get(audioDir));
             }
         } catch (ApiException | ClientException e) {
             System.out.println("error using VK API:");
@@ -200,9 +215,12 @@ public class CommunityPostsDownloader {
                 + ".repost-block { border-left: 3px solid #5181b8; padding-left: 15px; margin-top: 15px; padding-top: 5px; padding-bottom: 5px; }"
                 + ".repost-header { font-size: 13px; color: #555; margin-bottom: 5px; }"
                 + ".post-footer { display: flex; justify-content: space-between; margin-top: 15px; padding-top: 10px; border-top: 1px solid #f0f2f5; font-size: 13px; color: #65676b; }"
-                + ".pagination { text-align: center; margin-top: 30px; margin-bottom: 30px; }"
-                + ".pagination a, .pagination span { padding: 8px 12px; margin: 0 3px; background: white; border: 1px solid #ddd; text-decoration: none; color: #2a5885;  }"
+                + ".pagination { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 30px; margin-bottom: 30px; max-width: 600px; margin-left: auto; margin-right: auto; }"
+                + ".pagination a, .pagination span { padding: 8px 12px; background: white; border: 1px solid #ddd; text-decoration: none; color: #2a5885;  }"
                 + ".pagination .current { background: #2a5885; color: white; border-color: #2a5885; font-weight: bold; }"
+                + ".post-meta-extra { font-size: 13px; color: #555; margin-top: 10px; padding: 8px; background: #f9f9fa;  }"
+                + ".meta-item { margin-bottom: 4px; }"
+                + ".meta-item:last-child { margin-bottom: 0; }"
                 + "</style>";
 
         for (int page = 1; page <= totalPages; page++) {
@@ -246,6 +264,27 @@ public class CommunityPostsDownloader {
                 html.append(processAttachments(post.getAttachments(), post.getId()));
 
                 html.append(processRepostHistory(post.getCopyHistory(), post.getId()));
+
+
+                StringBuilder metaExtra = new StringBuilder();
+                if (post.getSignerId() != null) {
+                    metaExtra.append("<div class='meta-item'>Автор: <a href='https://vk.com/id")
+                            .append(post.getSignerId()).append("' target='_blank'>id")
+                            .append(post.getSignerId()).append("</a></div>");
+                }
+                if (post.getCopyright() != null) {
+                    metaExtra.append("<div class='meta-item'>Источник: <a class='origin-link' href='")
+                            .append(post.getCopyright().getLink()).append("' target='_blank'>")
+                            .append(HtmlUtils.escapeHtml(post.getCopyright().getName())).append("</a></div>");
+                }
+                if (post.getEdited() != null) {
+                    LocalDateTime editTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(post.getEdited()), ZoneId.systemDefault());
+                    metaExtra.append("<div class='meta-item'>Изменено: ").append(editTime.format(DATE_FORMATTER)).append("</div>");
+                }
+                if (metaExtra.length() > 0) {
+                    html.append("<div class='post-meta-extra'>").append(metaExtra.toString()).append("</div>");
+                }
+
 
                 int likes = post.getLikes() != null ? post.getLikes().getCount() : 0;
                 int comments = post.getComments() != null ? post.getComments().getCount() : 0;
@@ -309,7 +348,6 @@ public class CommunityPostsDownloader {
                         break;
 
                     case DOC:
-                    case GRAFFITI:
                         Doc doc = attach.getDoc();
                         String docUrl = doc.getUrl().toString();
                         String origTitle = doc.getTitle() != null ? doc.getTitle() : "document_" + doc.getId();
@@ -327,11 +365,25 @@ public class CommunityPostsDownloader {
                     case AUDIO:
                         Audio audio = attach.getAudio();
                         String audioUrlStr = (audio.getUrl() != null) ? audio.getUrl().toString() : "#";
+
+                        String localAudioName = "";
+                        if (!audioUrlStr.equals("#")) {
+                            String cleanArtist = audio.getArtist().replaceAll("[^\\p{L}\\p{Nd}]", "");
+                            String cleanTitle = audio.getTitle().replaceAll("[^\\p{L}\\p{Nd}]", "");
+                            localAudioName = audio.getId() + "_" + cleanArtist + "_" + cleanTitle + ".mp3";
+
+                            downloadFile(audioUrlStr, audioDir + localAudioName);
+                        }
+
+
                         html.append("<div class='other-attach'>")
                                 .append(HtmlUtils.escapeHtml(audio.getArtist())).append(" — ").append(HtmlUtils.escapeHtml(audio.getTitle()))
-                                .append(" (").append(HtmlUtils.formatDuration(audio.getDuration())).append(")<br>")
-                                .append("<a class='origin-link' href='").append(audioUrlStr).append("' target='_blank'>").append(audioUrlStr).append("</a>")
-                                .append("</div>");
+                                .append(" (").append(HtmlUtils.formatDuration(audio.getDuration())).append(")<br>");
+                        if (!localAudioName.isEmpty()) {
+                            html.append("<a href='./audio/").append(localAudioName).append("' download>Аудиофайл</a></div>");
+                        } else {
+                            html.append("<a class='origin-link' href='").append(audioUrlStr).append("' target='_blank'>").append(audioUrlStr).append("</a></div>");
+                        }
                         break;
 
                     case VIDEO:
@@ -358,6 +410,46 @@ public class CommunityPostsDownloader {
                                 .append("</div>");
                         break;
 
+                    case CLIP:
+                        Video clip = attach.getClip();
+                        String vkClipUrl = "https://vk.ru/video" + clip.getOwnerId() + "_" + clip.getId();
+
+                        String clipThumbTag = "";
+                        if (clip.getImage() != null && !clip.getImage().isEmpty()) {
+                            VideoImage maxImage = clip.getImage().stream()
+                                    .max(Comparator.comparingInt(VideoImage::getWidth))
+                                    .orElse(null);
+                            if (maxImage != null) {
+                                String localVideoImg = "video_thumb_" + clip.getId() + ".jpg";
+                                downloadFile(maxImage.getUrl().toString(), imagesDir + localVideoImg);
+                                clipThumbTag = "<img class='img-attach' src='./images/" + localVideoImg + "'/>";
+                            }
+                        }
+
+                        html.append("<div class='other-attach'>")
+                                .append(HtmlUtils.escapeHtml(clip.getTitle())).append(" (").append(HtmlUtils.formatDuration(clip.getDuration())).append(")<br>")
+                                .append("<a class='origin-link' href='").append(vkClipUrl).append("' target='_blank'>")
+                                .append(clipThumbTag)
+                                .append(vkClipUrl).append("</a>")
+                                .append("</div>");
+                        break;
+
+                    case GRAFFITI:
+                        Graffiti graffiti = attach.getGraffiti();
+                        String graffitiUrl = graffiti.getUrl().toString();
+                        String graffitiTitle = "Граффити" + graffiti.getId();
+                        String localGraffitiName = "graffiti" + "_" + graffitiTitle;
+
+                        downloadFile(graffitiUrl, imagesDir + localGraffitiName);
+
+                        html.append("<div class='other-attach'>")
+                                .append("Файл: ")
+                                .append("<a href='./documents/").append(localGraffitiName).append("' download>").append(HtmlUtils.escapeHtml(graffitiTitle)).append("</a><br>")
+                                .append("<a class='origin-link' href='").append(graffitiUrl).append("' target='_blank'>").append(graffitiUrl).append("</a>")
+                                .append("</div>");
+                        break;
+
+
                     case LINK:
                         Link link = attach.getLink();
                         html.append("<div class='other-attach link-attach'>")
@@ -370,7 +462,7 @@ public class CommunityPostsDownloader {
                         break;
 
                     case POLL:
-                        com.vk.api.sdk.objects.polls.Poll poll = attach.getPoll();
+                        Poll poll = attach.getPoll();
                         html.append("<div class='other-attach poll-attach'>")
                                 .append(HtmlUtils.escapeHtml(poll.getQuestion())).append("<br><ul style='margin:5px 0; padding-left:20px;'>");
                         if (poll.getAnswers() != null) {
@@ -382,7 +474,7 @@ public class CommunityPostsDownloader {
 
                     case ALBUM:
                         PhotoAlbum album = attach.getAlbum();
-                        String albumUrl = "https://vk.com" + album.getOwnerId() + "_" + album.getId();
+                        String albumUrl = "https://vk.com/album" + album.getOwnerId() + "_" + album.getId();
                         String albumThumbTag = "";
                         if (album.getThumb() != null) {
                             PhotoSizes maxAlbumSize = album.getThumb().getSizes().stream()
@@ -401,15 +493,126 @@ public class CommunityPostsDownloader {
                         break;
 
                     case MARKET:
-                        com.vk.api.sdk.objects.market.MarketItem market = attach.getMarket();
+                        MarketItem market = attach.getMarket();
                         html.append("<div class='other-attach'>")
                                 .append(HtmlUtils.escapeHtml(market.getTitle())).append("<br>")
-                                .append("<span style='color:#4bb34b; font-weight:bold;'>Цена: ").append(market.getPrice().getText()).append("</span>")
+                                .append("<span style='color:#4bb34b; font-weight:bold;'>Цена: ").append(market.getPrice().getText()).append("</span>");
+
+                        URI marketPhoto = market.getThumbPhoto();
+                        if (marketPhoto != null) {
+                            String marketPhotoUrl = marketPhoto.toURL().toString();
+                            String marketPhotoLocalName = "marketplace_" + postId + "_" + market.getId() + ".jpg";
+                            downloadFile(marketPhotoUrl, marketPhotoLocalName);
+                            html.append("<img class='img-attach' src='./images/").append(marketPhotoLocalName).append("' />");
+                            html.append("<a class='origin-link' href='").append(marketPhotoUrl).append("' target='_blank'>").append(marketPhotoUrl).append("</a>");
+                        }
+
+                        html.append("</div>");
+                        break;
+
+                    case VIDEO_PLAYLIST:
+                        VideoAlbum videoAlbum = attach.getVideoPlaylist();
+                        String vidPlaylistUrl = "https://vkvideo.ru/playlist/" + videoAlbum.getOwnerId() + "_" + videoAlbum.getId();
+                        html.append("<div class='other-attach'>Плейлист видео: ")
+                                .append(HtmlUtils.escapeHtml(videoAlbum.getTitle()))
+                                .append("<a class='origin-link' href='").append(vidPlaylistUrl).append("' target='_blank'>").append(vidPlaylistUrl).append("</a>")
                                 .append("</div>");
                         break;
 
+                    case EVENT:
+                        EventAttach event = attach.getEvent();
+                        String eventUrl = "https://vk.com" + event.getId();
+                        html.append("<div class='other-attach'>Встреча: ")
+                                .append(HtmlUtils.escapeHtml(event.getText()))
+                                .append("<a class='origin-link' href='").append(eventUrl).append("' target='_blank'>").append(eventUrl).append("</a>")
+                                .append("</div>");
+                        break;
+
+                    case DONUT_LINK:
+                        html.append("<div class='other-attach link-attach'>VK Donut ")
+                                .append("<a class='origin-link' href='https://vk.com/public").append(communityId).append("' target='_blank'>https://vk.com/public").append(communityId).append("</a>")
+                                .append("</div>");
+                        break;
+
+                    case NOTE:
+                        Note note = attach.getNote();
+                        String noteUrl = note.getViewUrl().toString();
+                        html.append("<div class='other-attach'>Заметка: <strong>")
+                                .append(HtmlUtils.escapeHtml(note.getTitle())).append("</strong><br>")
+                                .append(HtmlUtils.escapeHtml(note.getTextWiki())).append("<br>")
+                                .append(HtmlUtils.escapeHtml(note.getText())).append("<br>")
+                                .append("<a class='origin-link' href='").append(noteUrl).append("' target='_blank'>").append(noteUrl).append("</a>")
+                                .append("</div>");
+                        break;
+
+                    case APP:
+                        AppPost app = attach.getApp();
+                        String appUrl = "https://vk.com/app" + app.getId();
+                        html.append("<div class='other-attach'>Приложение: ")
+                                .append(HtmlUtils.escapeHtml(app.getName())).append("<br>")
+                                .append("<a class='origin-link' href='").append(appUrl).append("' target='_blank'>").append(appUrl).append("</a>");
+                        URI appPhoto = app.getPhoto604();
+                        if (appPhoto != null) {
+                            String appPic = appPhoto.toURL().toString();
+                            String localAppImgName = "app_" + postId + "_" + app.getId() + ".jpg";
+                            downloadFile(appPic, imagesDir + localAppImgName);
+                            html.append("<img class='img-attach' src='./images/").append(localAppImgName).append("' />");
+                            html.append("<a class='origin-link' href='").append(appPic).append("' target='_blank'>").append(appPic).append("</a>");
+                        }
+                        html.append("</div>");
+                        break;
+
+                    case GROUP:
+                        GroupAttach group = attach.getGroup();
+                        String groupUrl = "https://vk.com/public" + group.getId();
+                        html.append("<div class='other-attach'>Сообщество: ")
+                                .append(HtmlUtils.escapeHtml(group.getText())).append(" | ").append(group.getStatus())
+                                .append("<a class='origin-link' href='").append(groupUrl).append("' target='_blank'>").append(groupUrl).append("</a>")
+                                .append("</div>");
+                        break;
+
+                    case MARKET_ALBUM:
+                        MarketAlbum mAlbum = attach.getMarketAlbum();
+                        String mAlbumUrl = "https://vk.com/market" + communityId + "?section=album_" + mAlbum.getId();
+                        html.append("<div class='other-attach'>Маркетплейс: ")
+                                .append(HtmlUtils.escapeHtml(mAlbum.getTitle()))
+                                .append("<a class='origin-link' href='").append(mAlbumUrl).append("' target='_blank'>").append(mAlbumUrl).append("</a>");
+
+                        Photo mAlbumPhoto = mAlbum.getPhoto();
+                        if (mAlbumPhoto != null && mAlbumPhoto.getPhoto256() != null) {
+                            String mAlbumPhotoString = mAlbumPhoto.getPhoto256().toURL().toString();
+                            String mAlbumPhotoLocalName = "marketplace_" + postId + "_" + mAlbum.getId() + ".jpg";
+                            downloadFile(mAlbumPhotoString, mAlbumPhotoLocalName);
+                            html.append("<img class='img-attach' src='./images/").append(mAlbumPhotoLocalName).append("' />");
+                            html.append("<a class='origin-link' href='").append(mAlbumPhotoString).append("' target='_blank'>").append(mAlbumPhotoString).append("</a>");
+                        }
+
+                        html.append("</div>");
+                        break;
+
+                    case POSTED_PHOTO:
+                        PostedPhoto pPhoto = attach.getPostedPhoto();
+                        String pPhotoUrl = pPhoto.getPhoto604().toURL().toString();
+                        html.append("<div class='other-attach'>PostedPhoto: ")
+                                .append("<a class='origin-link' href='").append(pPhotoUrl).append("' target='_blank'>").append(pPhotoUrl).append("</a>");
+                        String pPhotoLocalName = "posted_photo_" + postId + "_" + pPhoto.getId() + ".jpg";
+                        downloadFile(pPhotoUrl, pPhotoLocalName);
+                        html.append("<img class='img-attach' src='./images/").append(pPhotoLocalName).append("' />");
+                        html.append("<a class='origin-link' href='").append(pPhotoUrl).append("' target='_blank'>").append(pPhotoUrl).append("</a>");
+                        html.append("</div>");
+                        break;
+
+                    case PAGE:
+                        WikipageFull article = attach.getPage();
+                        html.append("<div class='other-attach link-attach'>")
+                                .append("<strong>Статья: ").append(HtmlUtils.escapeHtml(article.getTitle())).append("</strong><br>")
+                                .append("<a class='origin-link' href='").append(article.getUrl()).append("' target='_blank'>").append(article.getUrl()).append("</a>")
+                                .append("</div>");
+                        break;
+
+
                     default:
-                        html.append("<div class='other-attach'>📎 Вложение: ").append(attach.getType().toString()).append("</div>");
+                        html.append("<div class='other-attach'>Вложение: ").append(attach.getType().toString()).append("</div>");
                         break;
                 }
             } catch (Exception e) {
@@ -430,7 +633,7 @@ public class CommunityPostsDownloader {
             String formattedDate = dateTime.format(DATE_FORMATTER);
 
             html.append("<div class='repost-block' style='border-left: 3px solid #5181b8; padding-left: 15px; margin-top: 15px; background: #fafbfc; padding-top: 5px; padding-bottom: 5px;'>");
-            html.append("<div class='header' style='border:none; font-size:13px;'>🔄 <strong>Репост</strong> | ").append(formattedDate).append(" | ID: ").append(subPost.getId()).append("-").append(subPost.getOwnerId()).append("</div>");
+            html.append("<div class='header' style='border:none; font-size:13px;'>🔄 <strong>Репост</strong> | ").append(formattedDate).append(" | ID: ").append(subPost.getOwnerId()).append("_").append(subPost.getId()).append("</div>");
             html.append("<div class='text' style='font-size:14px;'>").append(subPost.getText() != null ? HtmlUtils.escapeHtml(subPost.getText()) : "").append("</div>");
 
             // Передаем уникальный ID, складывая ID родителя и репоста, чтобы избежать конфликтов имен файлов картинок
@@ -444,7 +647,7 @@ public class CommunityPostsDownloader {
     private static void downloadFile(String urlStr, String destinationPath) {
         File file = new File(destinationPath);
         if (file.exists()) return; // Пропускаем, если уже скачали ранее
-
+        System.out.println("downloading file: " + destinationPath);
         try (InputStream in = new URL(urlStr).openStream();
              OutputStream out = Files.newOutputStream(Paths.get(destinationPath))) {
             byte[] buffer = new byte[4096];
