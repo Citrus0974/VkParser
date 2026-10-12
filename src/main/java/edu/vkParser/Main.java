@@ -1,21 +1,15 @@
 package edu.vkParser;
 
 
-import com.vk.api.sdk.client.TransportClient;
 import com.vk.api.sdk.client.VkApiClient;
-import com.vk.api.sdk.client.actors.GroupActor;
-import com.vk.api.sdk.client.actors.ServiceActor;
 import com.vk.api.sdk.httpclient.HttpTransportClient;
-import com.vk.api.sdk.objects.wall.responses.GetResponse;
 import edu.vkParser.actions.CommunityPostsDownloader;
 import edu.vkParser.exception.DownloadingException;
 import edu.vkParser.exception.SetupException;
 
 import java.io.BufferedReader;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Scanner;
 
 public class Main {

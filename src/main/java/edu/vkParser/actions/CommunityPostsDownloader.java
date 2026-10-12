@@ -192,7 +192,7 @@ public class CommunityPostsDownloader {
                 + ".header-meta { font-size: 14px; color: #555; }"
                 + ".text { font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }"
                 + ".attachments { margin-top: 12px; }"
-                + ".img-attach { max-width: 100%; display: block; margin: 8px auto 0 auto;  }"
+                + ".img-attach { width: 100%; height: auto; max-width: 100%; display: block; margin: 8px auto 0 auto;  }"
                 + ".other-attach { margin-top: 8px; font-size: 13px; color: #444; }"
                 + ".link-attach { background: #f0f2f5; padding: 10px;  border-left: 2px solid #adb5bd; }"
                 + ".poll-attach { border: 1px solid #ddd; padding: 10px;  }"
@@ -318,6 +318,7 @@ public class CommunityPostsDownloader {
                         downloadFile(docUrl, documentsDir + localDocName);
 
                         html.append("<div class='other-attach'>")
+                                .append("Файл: ")
                                 .append("<a href='./documents/").append(localDocName).append("' download>").append(HtmlUtils.escapeHtml(origTitle)).append("</a><br>")
                                 .append("<a class='origin-link' href='").append(docUrl).append("' target='_blank'>").append(docUrl).append("</a>")
                                 .append("</div>");
@@ -345,14 +346,15 @@ public class CommunityPostsDownloader {
                             if (maxImage != null) {
                                 String localVideoImg = "video_thumb_" + video.getId() + ".jpg";
                                 downloadFile(maxImage.getUrl().toString(), imagesDir + localVideoImg);
-                                videoThumbTag = "<img class='img-attach' src='./images/" + localVideoImg + "' style='max-height:200px;'/>";
+                                videoThumbTag = "<img class='img-attach' src='./images/" + localVideoImg + "'/>";
                             }
                         }
 
                         html.append("<div class='other-attach'>")
                                 .append(HtmlUtils.escapeHtml(video.getTitle())).append(" (").append(HtmlUtils.formatDuration(video.getDuration())).append(")<br>")
+                                .append("<a class='origin-link' href='").append(vkVideoUrl).append("' target='_blank'>")
                                 .append(videoThumbTag)
-                                .append("<a class='origin-link' href='").append(vkVideoUrl).append("' target='_blank'>").append(vkVideoUrl).append("</a>")
+                                .append(vkVideoUrl).append("</a>")
                                 .append("</div>");
                         break;
 
