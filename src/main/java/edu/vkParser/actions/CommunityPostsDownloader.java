@@ -12,7 +12,6 @@ import com.vk.api.sdk.objects.base.Link;
 import com.vk.api.sdk.objects.base.OwnerCover;
 import com.vk.api.sdk.objects.docs.Doc;
 import com.vk.api.sdk.objects.events.EventAttach;
-import com.vk.api.sdk.objects.fave.Page;
 import com.vk.api.sdk.objects.groups.Fields;
 import com.vk.api.sdk.objects.groups.GroupAttach;
 import com.vk.api.sdk.objects.groups.GroupFull;
@@ -26,12 +25,12 @@ import com.vk.api.sdk.objects.photos.PhotoSizes;
 import com.vk.api.sdk.objects.polls.Poll;
 import com.vk.api.sdk.objects.video.Video;
 import com.vk.api.sdk.objects.video.VideoAlbum;
-import com.vk.api.sdk.objects.video.VideoFull;
 import com.vk.api.sdk.objects.video.VideoImage;
 import com.vk.api.sdk.objects.wall.*;
 import com.vk.api.sdk.objects.wall.responses.GetResponse;
 import edu.vkParser.exception.DownloadingException;
 import edu.vkParser.exception.SetupException;
+import edu.vkParser.util.DownloadUtils;
 import edu.vkParser.util.HtmlUtils;
 
 import java.io.*;
@@ -65,15 +64,13 @@ public class CommunityPostsDownloader {
     private String documentsDir;
     private String audioDir;
 
-    private final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
     public CommunityPostsDownloader(long userId, String apiKey, VkApiClient vk, String communityId) {
         this.communityId = communityId;
         this.vk = vk;
-
         actor = new UserActor(userId, apiKey);
-
     }
 
     public void setupSettings() throws SetupException {
@@ -113,6 +110,7 @@ public class CommunityPostsDownloader {
             throw new SetupException(e);
         } catch (IOException e) {
             System.out.println("error creating folders");
+            throw new SetupException(e);
         }
     }
 
@@ -127,7 +125,7 @@ public class CommunityPostsDownloader {
         List<WallItem> allPosts = new ArrayList<>();
         int offset = 0;
         int count = 90; // ограничение за 1 запрос
-        boolean printTotalPostsFlag = true; //нужно напечатать общее число постов
+        boolean printTotalMessagesFlag = true; //нужно напечатать общее число постов
         int totalPosts = 1; // Динамически обновится при первом запросе
 
         long communityOwnerId = Long.parseLong(communityId);
@@ -139,11 +137,10 @@ public class CommunityPostsDownloader {
                         .offset(offset)
                         .count(count)
                         .execute();
-
-                totalPosts = response.getCount();
-                if (printTotalPostsFlag) {
+                if (printTotalMessagesFlag) {
+                    totalPosts = response.getCount();
                     System.out.println("Total posts: " + totalPosts);
-                    printTotalPostsFlag = false;
+                    printTotalMessagesFlag = false;
                 }
 
                 List<WallItem> posts = response.getItems();
@@ -179,13 +176,13 @@ public class CommunityPostsDownloader {
 
         String localAvatarName = "images/ava_" + communityId + ".jpg";
         if (communityAvatarUrl != null && !communityAvatarUrl.isEmpty()) {
-            downloadFile(communityAvatarUrl, outputDir + localAvatarName);
+            DownloadUtils.downloadFile(communityAvatarUrl, outputDir + localAvatarName);
         }
 
         String localCoverName = null;
         if (communityCoverUrl != null && !communityCoverUrl.isEmpty()) {
             localCoverName = "images/cover_" + communityId + ".jpg";
-            downloadFile(communityCoverUrl, outputDir + localCoverName);
+            DownloadUtils.downloadFile(communityCoverUrl, outputDir + localCoverName);
         }
 
         int postsPerPage = 50;
@@ -248,7 +245,7 @@ public class CommunityPostsDownloader {
 
             for (WallItem post : pagePosts) {
                 LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(post.getDate()), ZoneId.systemDefault());
-                String formattedDate = dateTime.format(DATE_FORMATTER);
+                String formattedDate = dateTime.format(dateTimeFormatter);
 
                 html.append("<div class='post'>");
 
@@ -279,7 +276,7 @@ public class CommunityPostsDownloader {
                 }
                 if (post.getEdited() != null) {
                     LocalDateTime editTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(post.getEdited()), ZoneId.systemDefault());
-                    metaExtra.append("<div class='meta-item'>Изменено: ").append(editTime.format(DATE_FORMATTER)).append("</div>");
+                    metaExtra.append("<div class='meta-item'>Изменено: ").append(editTime.format(dateTimeFormatter)).append("</div>");
                 }
                 if (metaExtra.length() > 0) {
                     html.append("<div class='post-meta-extra'>").append(metaExtra.toString()).append("</div>");
@@ -320,7 +317,7 @@ public class CommunityPostsDownloader {
             try (PrintWriter out = new PrintWriter(outputDir + pageFileName, "UTF-8")) {
                 out.print(html.toString());
             } catch (FileNotFoundException | UnsupportedEncodingException e) {
-                System.out.println("Error processing custom HTML page " + page);
+                System.out.println("Error processing HTML page " + page);
                 e.printStackTrace();
                 throw new DownloadingException(e);
             }
@@ -342,7 +339,7 @@ public class CommunityPostsDownloader {
                                 .get().getUrl().toURL();
 
                         String localImgName = "photo_" + postId + "_" + attach.getPhoto().getId() + ".jpg";
-                        downloadFile(maxPhotoUrl.toString(), imagesDir + localImgName);
+                        DownloadUtils.downloadFile(maxPhotoUrl.toString(), imagesDir + localImgName);
                         html.append("<img class='img-attach' src='./images/").append(localImgName).append("' />");
                         html.append("<a class='origin-link' href='").append(maxPhotoUrl.toString()).append("' target='_blank'>").append(maxPhotoUrl.toString()).append("</a>");
                         break;
@@ -353,7 +350,7 @@ public class CommunityPostsDownloader {
                         String origTitle = doc.getTitle() != null ? doc.getTitle() : "document_" + doc.getId();
                         String localDocName = doc.getId() + "_" + origTitle;
 
-                        downloadFile(docUrl, documentsDir + localDocName);
+                        DownloadUtils.downloadFile(docUrl, documentsDir + localDocName);
 
                         html.append("<div class='other-attach'>")
                                 .append("Файл: ")
@@ -372,7 +369,7 @@ public class CommunityPostsDownloader {
                             String cleanTitle = audio.getTitle().replaceAll("[^\\p{L}\\p{Nd}]", "");
                             localAudioName = audio.getId() + "_" + cleanArtist + "_" + cleanTitle + ".mp3";
 
-                            downloadFile(audioUrlStr, audioDir + localAudioName);
+                            DownloadUtils.downloadFile(audioUrlStr, audioDir + localAudioName);
                         }
 
 
@@ -397,7 +394,7 @@ public class CommunityPostsDownloader {
                                     .orElse(null);
                             if (maxImage != null) {
                                 String localVideoImg = "video_thumb_" + video.getId() + ".jpg";
-                                downloadFile(maxImage.getUrl().toString(), imagesDir + localVideoImg);
+                                DownloadUtils.downloadFile(maxImage.getUrl().toString(), imagesDir + localVideoImg);
                                 videoThumbTag = "<img class='img-attach' src='./images/" + localVideoImg + "'/>";
                             }
                         }
@@ -421,7 +418,7 @@ public class CommunityPostsDownloader {
                                     .orElse(null);
                             if (maxImage != null) {
                                 String localVideoImg = "video_thumb_" + clip.getId() + ".jpg";
-                                downloadFile(maxImage.getUrl().toString(), imagesDir + localVideoImg);
+                                DownloadUtils.downloadFile(maxImage.getUrl().toString(), imagesDir + localVideoImg);
                                 clipThumbTag = "<img class='img-attach' src='./images/" + localVideoImg + "'/>";
                             }
                         }
@@ -440,7 +437,7 @@ public class CommunityPostsDownloader {
                         String graffitiTitle = "Граффити" + graffiti.getId();
                         String localGraffitiName = "graffiti" + "_" + graffitiTitle;
 
-                        downloadFile(graffitiUrl, imagesDir + localGraffitiName);
+                        DownloadUtils.downloadFile(graffitiUrl, imagesDir + localGraffitiName);
 
                         html.append("<div class='other-attach'>")
                                 .append("Файл: ")
@@ -482,7 +479,7 @@ public class CommunityPostsDownloader {
                                     .orElse(null);
                             if (maxAlbumSize != null) {
                                 String localAlbumImg = "album_thumb_" + album.getId() + ".jpg";
-                                downloadFile(maxAlbumSize.getUrl().toURL().toString(), imagesDir + localAlbumImg);
+                                DownloadUtils.downloadFile(maxAlbumSize.getUrl().toURL().toString(), imagesDir + localAlbumImg);
                                 albumThumbTag = "<img class='img-attach' src='./images/" + localAlbumImg + "' style='max-height:150px; margin-bottom:5px;'/>";
                             }
                         }
@@ -502,7 +499,7 @@ public class CommunityPostsDownloader {
                         if (marketPhoto != null) {
                             String marketPhotoUrl = marketPhoto.toURL().toString();
                             String marketPhotoLocalName = "marketplace_" + postId + "_" + market.getId() + ".jpg";
-                            downloadFile(marketPhotoUrl, marketPhotoLocalName);
+                            DownloadUtils.downloadFile(marketPhotoUrl, marketPhotoLocalName);
                             html.append("<img class='img-attach' src='./images/").append(marketPhotoLocalName).append("' />");
                             html.append("<a class='origin-link' href='").append(marketPhotoUrl).append("' target='_blank'>").append(marketPhotoUrl).append("</a>");
                         }
@@ -555,7 +552,7 @@ public class CommunityPostsDownloader {
                         if (appPhoto != null) {
                             String appPic = appPhoto.toURL().toString();
                             String localAppImgName = "app_" + postId + "_" + app.getId() + ".jpg";
-                            downloadFile(appPic, imagesDir + localAppImgName);
+                            DownloadUtils.downloadFile(appPic, imagesDir + localAppImgName);
                             html.append("<img class='img-attach' src='./images/").append(localAppImgName).append("' />");
                             html.append("<a class='origin-link' href='").append(appPic).append("' target='_blank'>").append(appPic).append("</a>");
                         }
@@ -582,7 +579,7 @@ public class CommunityPostsDownloader {
                         if (mAlbumPhoto != null && mAlbumPhoto.getPhoto256() != null) {
                             String mAlbumPhotoString = mAlbumPhoto.getPhoto256().toURL().toString();
                             String mAlbumPhotoLocalName = "marketplace_" + postId + "_" + mAlbum.getId() + ".jpg";
-                            downloadFile(mAlbumPhotoString, mAlbumPhotoLocalName);
+                            DownloadUtils.downloadFile(mAlbumPhotoString, mAlbumPhotoLocalName);
                             html.append("<img class='img-attach' src='./images/").append(mAlbumPhotoLocalName).append("' />");
                             html.append("<a class='origin-link' href='").append(mAlbumPhotoString).append("' target='_blank'>").append(mAlbumPhotoString).append("</a>");
                         }
@@ -596,7 +593,7 @@ public class CommunityPostsDownloader {
                         html.append("<div class='other-attach'>PostedPhoto: ")
                                 .append("<a class='origin-link' href='").append(pPhotoUrl).append("' target='_blank'>").append(pPhotoUrl).append("</a>");
                         String pPhotoLocalName = "posted_photo_" + postId + "_" + pPhoto.getId() + ".jpg";
-                        downloadFile(pPhotoUrl, pPhotoLocalName);
+                        DownloadUtils.downloadFile(pPhotoUrl, pPhotoLocalName);
                         html.append("<img class='img-attach' src='./images/").append(pPhotoLocalName).append("' />");
                         html.append("<a class='origin-link' href='").append(pPhotoUrl).append("' target='_blank'>").append(pPhotoUrl).append("</a>");
                         html.append("</div>");
@@ -630,7 +627,7 @@ public class CommunityPostsDownloader {
         StringBuilder html = new StringBuilder();
         for (WallpostFull subPost : history) {
             LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(subPost.getDate()), ZoneId.systemDefault());
-            String formattedDate = dateTime.format(DATE_FORMATTER);
+            String formattedDate = dateTime.format(dateTimeFormatter);
 
             html.append("<div class='repost-block' style='border-left: 3px solid #5181b8; padding-left: 15px; margin-top: 15px; background: #fafbfc; padding-top: 5px; padding-bottom: 5px;'>");
             html.append("<div class='header' style='border:none; font-size:13px;'>🔄 <strong>Репост</strong> | ").append(formattedDate).append(" | ID: ").append(subPost.getOwnerId()).append("_").append(subPost.getId()).append("</div>");
@@ -643,21 +640,5 @@ public class CommunityPostsDownloader {
         return html.toString();
     }
 
-
-    private static void downloadFile(String urlStr, String destinationPath) {
-        File file = new File(destinationPath);
-        if (file.exists()) return; // Пропускаем, если уже скачали ранее
-        System.out.println("downloading file: " + destinationPath);
-        try (InputStream in = new URL(urlStr).openStream();
-             OutputStream out = Files.newOutputStream(Paths.get(destinationPath))) {
-            byte[] buffer = new byte[4096];
-            int bytesRead;
-            while ((bytesRead = in.read(buffer)) != -1) {
-                out.write(buffer, 0, bytesRead);
-            }
-        } catch (IOException e) {
-            System.out.println("failed to download: " + urlStr);
-        }
-    }
 
 }

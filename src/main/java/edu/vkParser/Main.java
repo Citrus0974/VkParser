@@ -4,6 +4,7 @@ package edu.vkParser;
 import com.vk.api.sdk.client.VkApiClient;
 import com.vk.api.sdk.httpclient.HttpTransportClient;
 import edu.vkParser.actions.CommunityPostsDownloader;
+import edu.vkParser.actions.DialogMessagesDownloader;
 import edu.vkParser.exception.DownloadingException;
 import edu.vkParser.exception.SetupException;
 
@@ -49,13 +50,13 @@ public class Main {
                         System.out.println("api key is invalid");
                         continue;
                     }
-                    if (userIdString == null || userIdString.isEmpty()){
+                    if (userIdString == null || userIdString.isEmpty()) {
                         System.out.println("user id is invalid");
                         continue;
                     } else {
                         try {
                             userId = Long.parseLong(userIdString);
-                        } catch (NumberFormatException e){
+                        } catch (NumberFormatException e) {
                             System.out.println("user id is invalid");
                             continue;
                         }
@@ -63,7 +64,7 @@ public class Main {
                     if (decision == 1) {
                         System.out.println("enter community id:");
                         String communityId = scanner.nextLine();
-                        if (communityId == null || communityId.isEmpty()){
+                        if (communityId == null || communityId.isEmpty()) {
                             System.out.println("community id is invalid");
                             continue;
                         }
@@ -74,12 +75,36 @@ public class Main {
                         System.out.println("press enter to continue...");
                         scanner.nextLine();
                     }
+                    if (decision == 2) {
+                        System.out.println("enter peer profile id:");
+                        String peerIdString = scanner.nextLine();
+                        if (peerIdString == null || peerIdString.isEmpty()) {
+                            System.out.println("peer id is invalid");
+                            continue;
+                        }
+                        try {
+                            long peerId = Long.parseLong(peerIdString);
+                            DialogMessagesDownloader downloader = new DialogMessagesDownloader(userId, apiKey, new VkApiClient(new HttpTransportClient()), peerId);
+                            downloader.setupSettings();
+                            downloader.startDownloading();
+                            System.out.println("Success!");
+                            System.out.println("press enter to continue...");
+                            scanner.nextLine();
+                        } catch (NumberFormatException e) {
+                            System.out.println("peer id is invalid");
+                            continue;
+                        }
+                    }
+
+                    if(decision==3) {
+                        System.out.println("3");
+                    }
 
 
                 } catch (IOException e) {
                     System.out.println("error reading file api-keys.txt");
                     continue;
-                } catch (SetupException e){
+                } catch (SetupException e) {
                     System.out.println("error while setting up downloader. try again.");
                     continue;
                 } catch (DownloadingException e) {
