@@ -2,24 +2,20 @@ package edu.vkParser.actions;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.vk.api.sdk.client.VkApiClient;
 import com.vk.api.sdk.client.actors.UserActor;
 import com.vk.api.sdk.exceptions.ApiException;
 import com.vk.api.sdk.exceptions.ClientException;
 import com.vk.api.sdk.objects.audio.Audio;
-import com.vk.api.sdk.objects.base.Image;
-import com.vk.api.sdk.objects.base.Link;
 import com.vk.api.sdk.objects.base.Sticker;
 import com.vk.api.sdk.objects.calls.Call;
 import com.vk.api.sdk.objects.docs.Doc;
-import com.vk.api.sdk.objects.gifts.Gift;
 import com.vk.api.sdk.objects.gifts.Layout;
 import com.vk.api.sdk.objects.groups.GroupFull;
 import com.vk.api.sdk.objects.market.MarketItem;
-import com.vk.api.sdk.objects.messages.ForeignMessage;
-import com.vk.api.sdk.objects.messages.Graffiti;
-import com.vk.api.sdk.objects.messages.Message;
-import com.vk.api.sdk.objects.messages.MessageAttachment;
+import com.vk.api.sdk.objects.messages.*;
 import com.vk.api.sdk.objects.messages.responses.GetHistoryExtendedResponse;
 import com.vk.api.sdk.objects.photos.PhotoSizes;
 import com.vk.api.sdk.objects.polls.Poll;
@@ -27,7 +23,6 @@ import com.vk.api.sdk.objects.stories.Story;
 import com.vk.api.sdk.objects.users.Fields;
 import com.vk.api.sdk.objects.users.UserFull;
 import com.vk.api.sdk.objects.users.responses.GetResponse;
-import com.vk.api.sdk.objects.video.Video;
 import com.vk.api.sdk.objects.wall.WallComment;
 import edu.vkParser.exception.DownloadingException;
 import edu.vkParser.exception.SetupException;
@@ -37,6 +32,7 @@ import edu.vkParser.util.HtmlUtils;
 import java.io.*;
 import java.net.URI;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Instant;
@@ -369,8 +365,20 @@ public class DialogMessagesDownloader {
                 }
 
                 // Вложения и пересланные сообщения
-                html.append(processMessageAttachments(msg.getAttachments(), msg.getId()));
-                html.append(processMessageReposts(msg.getFwdMessages(), msg.getId(), users, groups));
+                if (msg.getAttachments() != null && !msg.getAttachments().isEmpty()) {
+                    boolean hasExtraAttachments = msg.getAttachments().stream().anyMatch(attach -> {
+                        MessageAttachmentType type = attach.getType();
+                        return type == MessageAttachmentType.LINK || type == MessageAttachmentType.VIDEO || type == MessageAttachmentType.WALL || type == MessageAttachmentType.VIDEO_PLAYLIST;
+                    });
+                    if (hasExtraAttachments) {
+                        html.append(processMessageAttachmentsManualParsing(msg.getId()));
+                    } else {
+                        html.append(processMessageAttachments(msg.getAttachments(), msg.getId()));
+                    }
+                }
+                if (msg.getFwdMessages() != null && !msg.getFwdMessages().isEmpty()) {
+                    html.append(processForwardedMessages(msg.getFwdMessages(), msg.getId(), users, groups));
+                }
 
                 html.append("</div>"); // Закрытие .msg-content (теперь строго на своем месте)
 
@@ -439,6 +447,127 @@ public class DialogMessagesDownloader {
         }
     }
 
+    private String processMessageAttachmentsManualParsing(Integer messageId) {
+        JsonArray rawAttachments = getRawAttachmentsByMsgId(messageId);
+        if (rawAttachments == null || rawAttachments.isEmpty()) return "";
+
+
+//        return "<div class='attachments'>" + rawAttachments.toString() + "</div>";
+
+
+        StringBuilder html = new StringBuilder();
+        List<MessageAttachment> standardAttachments = new ArrayList<>();
+        StringBuilder manualHtml = new StringBuilder();
+
+        for (int i = 0; i < rawAttachments.size(); i++) {
+            JsonObject attachObj = rawAttachments.get(i).getAsJsonObject();
+            if (!attachObj.has("type")) continue;
+
+            String type = attachObj.get("type").getAsString().toLowerCase();
+
+            // Если тип проблемный — парсим вручную прямо из JSON
+            if ("video".equals(type) && attachObj.has("video")) {
+                JsonObject videoObj = attachObj.getAsJsonObject("video");
+                long ownerId = videoObj.has("owner_id") ? videoObj.get("owner_id").getAsLong() : 0;
+                long videoId = videoObj.has("id") ? videoObj.get("id").getAsLong() : 0;
+                String title = videoObj.has("title") ? videoObj.get("title").getAsString() : "Видеозапись";
+                int duration = videoObj.has("duration") ? videoObj.get("duration").getAsInt() : 0;
+
+                String vkVideoUrl = "https://vk.com" + ownerId + "_" + videoId;
+
+                // Пытаемся вытащить обложку видео из массива image
+                String videoThumbTag = "";
+                if (videoObj.has("image") && !videoObj.getAsJsonArray("image").isEmpty()) {
+                    JsonArray imageArray = videoObj.getAsJsonArray("image");
+                    // Ищем картинку с максимальной шириной
+                    JsonObject maxImage = imageArray.get(imageArray.size() - 1).getAsJsonObject();
+                    for (int j = 0; j < imageArray.size(); j++) {
+                        JsonObject img = imageArray.get(j).getAsJsonObject();
+                        if (img.has("width") && maxImage.has("width") && img.get("width").getAsInt() > maxImage.get("width").getAsInt()) {
+                            maxImage = img;
+                        }
+                    }
+                    if (maxImage.has("url")) {
+                        String localVideoImg = "video_thumb_" + videoId + ".jpg";
+                        DownloadUtils.downloadFile(maxImage.get("url").getAsString(), imagesDir + localVideoImg);
+                        videoThumbTag = "<img class='img-attach' src='./images/" + localVideoImg + "' /><br>";
+                    }
+                }
+
+                manualHtml.append("<div class='other-attach'>")
+                        .append(HtmlUtils.escapeHtml(title)).append(" (").append(HtmlUtils.formatDuration(duration)).append(")<br>")
+                        .append(videoThumbTag)
+                        .append("<a class='origin-link' href='").append(vkVideoUrl).append("' target='_blank'>").append(vkVideoUrl).append("</a>")
+                        .append("</div>");
+
+            } else if ("video_playlist".equals(type) && attachObj.has("video_playlist")) {
+                com.google.gson.JsonObject playlistObj = attachObj.getAsJsonObject("video_playlist");
+                long ownerId = playlistObj.has("owner_id") ? playlistObj.get("owner_id").getAsLong() : 0;
+                long playlistId = playlistObj.has("id") ? playlistObj.get("id").getAsLong() : 0;
+                String title = playlistObj.has("title") ? playlistObj.get("title").getAsString() : "Плейлист видео";
+
+                String playlistUrl = "https://vk.com/playlist/" + ownerId + "_" + playlistId;
+                manualHtml.append("<div class='other-attach'>")
+                        .append(HtmlUtils.escapeHtml(title)).append("<br>")
+                        .append("<a class='origin-link' href='").append(playlistUrl).append("' target='_blank'>").append(playlistUrl).append("</a>")
+                        .append("</div>");
+
+            } else if ("link".equals(type) && attachObj.has("link")) {
+                com.google.gson.JsonObject linkObj = attachObj.getAsJsonObject("link");
+                String url = linkObj.has("url") ? linkObj.get("url").getAsString() : "#";
+                String title = linkObj.has("title") ? linkObj.get("title").getAsString() : "Ссылка";
+                String desc = linkObj.has("description") ? linkObj.get("description").getAsString() : "";
+
+                manualHtml.append("<div class='other-attach link-attach'>")
+                        .append("<a href='").append(url).append("' target='_blank'>").append(HtmlUtils.escapeHtml(title)).append("</a><br>");
+                if (!desc.isEmpty()) {
+                    manualHtml.append("<small style='color:gray;'>").append(HtmlUtils.escapeHtml(desc)).append("</small><br>");
+                }
+                manualHtml.append("<a class='origin-link' href='").append(url).append("' target='_blank'>").append(url).append("</a>")
+                        .append("</div>");
+
+            } else if ("wall".equals(type) && attachObj.has("wall")) {
+                com.google.gson.JsonObject wallObj = attachObj.getAsJsonObject("wall");
+                long toId = wallObj.has("to_id") ? wallObj.get("to_id").getAsLong() : 0;
+                long wallId = wallObj.has("id") ? wallObj.get("id").getAsLong() : 0;
+                String text = wallObj.has("text") ? wallObj.get("text").getAsString() : "";
+
+                String wallPostUrl = "https://vk.com/wall" + toId + "_" + wallId;
+                manualHtml.append("<div class='repost-block'>");
+                manualHtml.append("<div class='repost-header'>Пост на стене</div>");
+                if (!text.isEmpty()) {
+                    manualHtml.append("<div class='text' style='font-size:14px;'>").append(HtmlUtils.escapeHtml(text)).append("</div>");
+                }
+                manualHtml.append("<a class='origin-link' href='").append(wallPostUrl).append("' target='_blank'>").append(wallPostUrl).append("</a>");
+                manualHtml.append("</div>");
+
+            } else {
+                // Если вложение обычное (photo, doc, audio_message и т.д.) — превращаем JSON обратно в объект SDK
+                try {
+                    MessageAttachment parsedAttach = gson.fromJson(attachObj, MessageAttachment.class);
+                    if (parsedAttach != null) {
+                        standardAttachments.add(parsedAttach);
+                    }
+                } catch (Exception e) {
+                    System.out.println("manual attachments data deserialization error!");
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        if (!standardAttachments.isEmpty()) {
+            html.append(processMessageAttachments(standardAttachments, messageId));
+        }
+
+        if (manualHtml.length() > 0) {
+            // Оборачиваем ручные вложения в контейнер, так как processMessageAttachments для них не вызывался
+            html.append("<div class='attachments'>").append(manualHtml).append("</div>");
+        }
+
+//        return html.toString();
+        return "<div class='attachments'>" + rawAttachments.toString() + "</div>";
+    }
+
     private String getReplyMessagePreview(ForeignMessage replyMsg) {
         String previewText = "";
         if (replyMsg.getText() != null && !replyMsg.getText().isEmpty()) {
@@ -454,7 +583,7 @@ public class DialogMessagesDownloader {
         return previewText;
     }
 
-    private String processMessageReposts(List<ForeignMessage> fwdMessages, Integer messageId, Map<Long, UserFull> users, Map<Long, GroupFull> groups) {
+    private String processForwardedMessages(List<ForeignMessage> fwdMessages, Integer messageId, Map<Long, UserFull> users, Map<Long, GroupFull> groups) {
         if (fwdMessages == null || fwdMessages.isEmpty()) return "";
 
         StringBuilder html = new StringBuilder();
@@ -504,12 +633,12 @@ public class DialogMessagesDownloader {
             // Передаем их во временный обработчик вложений (класс WallpostAttachment и MessageAttachment имеют разный тип,
             // поэтому для сообщений мы напишем отдельный processMessageAttachments на следующем шаге)
             if (fwd.getAttachments() != null && !fwd.getAttachments().isEmpty()) {
-                html.append(processMessageAttachments(fwd.getAttachments(), messageId + fwd.hashCode()));
+                html.append(processMessageAttachments(fwd.getAttachments(), messageId + fwd.getId()));
             }
 
             // Рекурсивный вызов: если внутри пересланного сообщения есть еще пересланные
             if (fwd.getFwdMessages() != null && !fwd.getFwdMessages().isEmpty()) {
-                html.append(processMessageReposts(fwd.getFwdMessages(), messageId, users, groups));
+                html.append(processForwardedMessages(fwd.getFwdMessages(), messageId, users, groups));
             }
 
             html.append("</div>"); // Конец .repost-block
@@ -769,9 +898,9 @@ public class DialogMessagesDownloader {
                                     .orElse(null);
                             if (maxAlbumSize != null && maxAlbumSize.getUrl() != null) {
                                 String localAlbumImg = "market_album_" + messageId + "_" + marketAlbum.getId() + ".jpg";
-                                    DownloadUtils.downloadFile(maxAlbumSize.getUrl().toString(), imagesDir + localAlbumImg);
-                                    albumThumbTag = "<img class='img-attach' style='max-width:200px;' src='./images/"
-                                            + localAlbumImg + "' />";
+                                DownloadUtils.downloadFile(maxAlbumSize.getUrl().toString(), imagesDir + localAlbumImg);
+                                albumThumbTag = "<img class='img-attach' style='max-width:200px;' src='./images/"
+                                        + localAlbumImg + "' />";
                             }
                         }
 
@@ -822,6 +951,36 @@ public class DialogMessagesDownloader {
         return html.toString();
     }
 
+
+    private JsonArray getRawAttachmentsByMsgId(int msgId) {
+        try {
+            // Делаем прямой запрос к API ВКонтакте
+            String rawJson = vk.getTransportClient().post(vk.getApiEndpoint() + "messages.getById",
+                            "access_token=" + URLEncoder.encode(actor.getAccessToken(), "UTF-8")
+                                    + "&v=" + URLEncoder.encode(vk.getVersion(), "UTF-8")
+                                    + "&message_ids=" + msgId + "&extended=1",
+                            "application/x-www-form-urlencoded")
+                    .getContent();
+            System.out.println(rawJson);
+
+            JsonObject fullResponse = gson.fromJson(rawJson, JsonObject.class);            // Парсим строку в дерево элементов Gson
+            if (fullResponse.has("response")) {
+                JsonObject responseBody = fullResponse.getAsJsonObject("response");
+                JsonArray items = responseBody.getAsJsonArray("items");
+
+                if (items != null && !items.isEmpty()) {
+                    JsonObject messageObj = items.get(0).getAsJsonObject();
+                    if (messageObj.has("attachments")) {
+                        return messageObj.getAsJsonArray("attachments");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("error while fetching raw message for message ID: " + msgId);
+            e.printStackTrace();
+        }
+        return null;
+    }
 
 }
 
